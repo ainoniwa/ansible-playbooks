@@ -1,0 +1,46 @@
+# Reference
+#  - http://munin.readthedocs.org/en/latest/example/webserver/nginx.html
+#  - https://github.com/jonnymccullagh/munstrap
+
+- hosts: all
+  sudo: yes
+  tasks:
+    - apt: name={{ item }} update_cache=yes state=installed
+      with_items:
+        - munin
+        - nginx
+        - php5-cgi
+        - spawn-fcgi
+        - libcgi-fast-perl
+        - git-core
+
+    - git: repo=https://github.com/jonnymccullagh/munstrap dest=/etc/munin/munstrap
+    - mount: name=/etc/munin/static/ src=/etc/munin/munstrap/static/ fstype=none opts=bind state=mounted
+    - mount: name=/etc/munin/templates/ src=/etc/munin/munstrap/templates/ fstype=none opts=bind state=mounted
+
+    - file: path=/var/log/munin/munin-cgi-graph.log owner=munin group=munin
+    - copy: src=conf/munin-cgi-graph.conf dest=/etc/init/munin-cgi-graph.conf
+      notify:
+        - restart-munin-cgi-graph
+
+    - file: path=/var/log/munin/munin-cgi-html.log owner=munin group=munin
+    - copy: src=conf/munin-html-graph.conf dest=/etc/init/munin-html-graph.conf
+      notify:
+        - restart-munin-html-graph
+
+    - copy: src=conf/munin.conf dest=/etc/munin/munin.conf
+    - copy: src=conf/nginx-munin.conf dest=/etc/nginx/sites-available/munin
+    - file: path=/etc/nginx/sites-enabled/default state=absent
+    - file: src=/etc/nginx/sites-available/munin dest=/etc/nginx/sites-enabled/munin state=link
+      notify:
+        - restart-nginx
+
+    - command: munin-check
+
+  handlers:
+    - name: restart-munin-cgi-graph
+      service: name=munin-cgi-graph state=restarted
+    - name: restart-munin-html-graph
+      service: name=munin-html-graph state=restarted
+    - name: restart-nginx
+      service: name=nginx state=restarted
