@@ -1,0 +1,39 @@
+# Reference
+#  - http://shinkenlab.io/online-course-1-installation/
+#  - http://shinkenlab.io/online-course-2-webui/
+
+- hosts: all
+  sudo: yes
+  tasks:
+    - apt: name={{ item }} update_cache=yes state=installed
+      with_items:
+        - python-pip
+        - python-pycurl
+    - user: name=shinken createhome=yes shell=/bin/bash
+    - pip: name=shinken
+
+    - service: name=shinken state=started enabled=yes
+
+    - command: shinken --init
+      sudo_user: shinken
+
+    - command: shinken install webui
+      sudo_user: shinken
+
+    - command: shinken install auth-cfg-password
+      sudo_user: shinken
+
+    - copy: src=conf/broker-master.cfg dest=/etc/shinken/brokers/broker-master.cfg
+      sudo_user: shinken
+      notify:
+        - restart-shinken
+
+    - copy: src=conf/webui.cfg dest=/etc/shinken/modules/webui.cfg
+      sudo_user: shinken
+      notify:
+        - restart-shinken
+
+  handlers:
+    - name: restart-shinken
+      service: name=shinken state=restarted
+
