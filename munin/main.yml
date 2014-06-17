@@ -36,6 +36,8 @@
         - restart-nginx
 
     - command: munin-check
+    - shell: munin-cron
+      sudo_user: munin
 
   handlers:
     - name: restart-munin-cgi-graph
