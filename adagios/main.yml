@@ -7,6 +7,7 @@
 #  - pynag instell from git.
 #    pynag is 0.8.9 in pypi, but few critical fix in git.
 #  - Django<=1.5.
+#  - fping, if need okconfig network scan.
 #--------------------------------------------------------------------------
 
 - hosts: all
@@ -25,57 +26,72 @@
         - libgmp-dev
         - python-dev
         - python-paramiko
+        - fping
 
     # Need to nagios status/restart from adagios
     - copy: src=conf/sudoers-nagios3 dest=/etc/sudoers.d/nagios3
     - file: path=/etc/sudoers.d/nagios3 mode=0440
 
     - git: repo=https://github.com/pynag/pynag.git dest=/opt/pynag
-    - command: python setup.py build   chdir=/opt/pynag
-    - command: python setup.py install chdir=/opt/pynag
+    - shell: python setup.py build   chdir=/opt/pynag
+    - shell: python setup.py install chdir=/opt/pynag
 
     - git: repo=https://github.com/opinkerfi/adagios.git dest=/opt/adagios
-    - command: cp -r /opt/adagios/adagios/etc/adagios /etc/
+    - shell: cp -r /opt/adagios/adagios/etc/adagios /etc/
     - file: path=/etc/adagios owner=nagios group=nagios recurse=yes
     - file: path=/etc/nagios3 owner=nagios group=nagios recurse=yes
     - file: path=/etc/nagios3/adagios owner=nagios group=nagios state=directory
-      notify:
-        - adagios-git-init
-        - adagios-git-add
-        - adagios-git-commit
+    - shell: git init chdir=/etc/nagios3 creates=/etc/nagios3/.git
+      sudo_user: nagios
+      register: git_init
+    - shell: git config --global user.email "adagios@localdomain"
+      sudo_user: nagios
+      register: git_init
+    - shell: git config --global user.name "Adagios"
+      sudo_user: nagios
+      when: git_init|changed
 
-    - command: sed -i 's|/etc/nagios/nagios.cfg|/etc/nagios3/nagios.cfg|;' /etc/adagios/adagios.conf
-    - command: sed -i 's|/etc/nagios/adagios|/etc/nagios3/adagios|;' /etc/adagios/adagios.conf
-    - command: sed -i 's|sudo /etc/init.d/nagios|sudo /etc/init.d/nagios3|;' /etc/adagios/adagios.conf
-    - command: sed -i 's|nagios_url = "/nagios"|nagios_url = "/nagios3"|;' /etc/adagios/adagios.conf
-    - command: sed -i 's|"/usr/sbin/nagios"|"/usr/sbin/nagios3"|;' /etc/adagios/adagios.conf
-    - command: sed -i 's|"/usr/share/nagios/html/pnp4nagios/index.php"|"/usr/share/pnp4nagios/html/index.php"|;' /etc/adagios/adagios.conf
-    - command: pynag config --append cfg_dir=/etc/nagios3/adagios
-    - command: pynag config --append "broker_module=/usr/lib/check_mk/livestatus.o /var/lib/nagios3/rw/livestatus"
-    - command: pynag config --set "process_performance_data=1"
-    - command: pynag config --append "broker_module=/usr/lib/pnp4nagios/npcdmod.o config_file=/etc/pnp4nagios/npcd.cfg"
-    - command: sed -i 's/RUN.*/RUN="yes"/' /etc/default/npcd
+    - shell: sed -i 's|/etc/nagios/nagios.cfg|/etc/nagios3/nagios.cfg|;' /etc/adagios/adagios.conf
+    - shell: sed -i 's|/etc/nagios/adagios|/etc/nagios3/adagios|;' /etc/adagios/adagios.conf
+    - shell: sed -i 's|sudo /etc/init.d/nagios|sudo /etc/init.d/nagios3|;' /etc/adagios/adagios.conf
+    - shell: sed -i 's|nagios_url = "/nagios"|nagios_url = "/nagios3"|;' /etc/adagios/adagios.conf
+    - shell: sed -i 's|"/usr/sbin/nagios"|"/usr/sbin/nagios3"|;' /etc/adagios/adagios.conf
+    - shell: sed -i 's|"/usr/share/nagios/html/pnp4nagios/index.php"|"/usr/share/pnp4nagios/html/index.php"|;' /etc/adagios/adagios.conf
+    - shell: pynag config --append cfg_dir=/etc/nagios3/adagios
+    - shell: pynag config --append "broker_module=/usr/lib/check_mk/livestatus.o /var/lib/nagios3/rw/livestatus"
+    - shell: pynag config --set "process_performance_data=1"
+    - shell: pynag config --append "broker_module=/usr/lib/pnp4nagios/npcdmod.o config_file=/etc/pnp4nagios/npcd.cfg"
+    - shell: sed -i 's/RUN.*/RUN="yes"/' /etc/default/npcd
     - user: name=nagios groups=www-data append=yes
     - service: name=npcd    state=started enabled=yes
-    - service: name=nagios3 state=restarted
 
-    - command: htpasswd -b -c /etc/nagios3/htpasswd.users adagios adagios creates=/etc/nagios3/htpasswd.users
+    - shell: htpasswd -b -c /etc/nagios3/htpasswd.users adagios adagios creates=/etc/nagios3/htpasswd.users
     - copy: src=conf/apache2-adagios.conf dest=/etc/apache2/conf.d/adagios.conf
       notify:
         - restart-apache2
 
+    # OKConfig
+    - file: src=/etc/nagios3 dest=/etc/nagios state=link
+    - git: repo=https://github.com/opinkerfi/okconfig.git dest=/opt/okconfig
+      register: git_update
+      notify:
+        - restart-apache2
+    - shell: python setup.py install chdir=/opt/okconfig
+      when: git_update|changed
+    - shell: okconfig init
+      sudo_user: nagios
+      when: git_update|changed
+    # "OKConfigError: Examples directory does not exist: /etc/nagios/okconfig/examples"
+    - file: path=/etc/nagios/okconfig/examples owner=nagios group=nagios state=directory
+
+    - shell: git add . chdir=/etc/nagios3
+      sudo_user: nagios
+      when: git_init|changed
+    - shell: git commit -m "Initial commit" chdir=/etc/nagios3
+      sudo_user: nagios
+      when: git_init|changed
+    - service: name=nagios3 state=restarted
+
   handlers:
     - name: restart-apache2
       service: name=apache2 state=restarted
-
-    - name: adagios-git-init
-      command: git init chdir=/etc/nagios3
-      sudo_user: nagios
-
-    - name: adagios-git-add
-      command: git add . chdir=/etc/nagios3
-      sudo_user: nagios
-
-    - name: adagios-git-commit
-      command: git commit -a -m "Initial commit" chdir=/etc/nagios3
-      sudo_user: nagios
